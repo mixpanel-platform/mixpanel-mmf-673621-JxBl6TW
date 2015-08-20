@@ -7,9 +7,133 @@
     <script src="https://cdn.mxpnl.com/libs/mixpanel-platform/build/mixpanel-platform.v0.latest.min.js"></script>
   </head>
   <body class="mixpanel-platform-body">
-    <h1>Hello, World!</h1>
+    <div class="mixpanel-platform-section">
+      <div class="instructions">
+        <h1 style="font-size: 18px; color: rgb(95,105,131)">People Profiles Export</h1>
+        <p style="font-size: 13px; color: rgb(95,105,131)">Please enter property selector. For example: ("San Francisco" in properties["$city"]) </p>
+      </div>
+      <form id="property" style="margin-bottom: 15px; height: 31px">
+        <input type="text" autofocus placeholder="Property Selector" name="property-name-field" value="" style="color: rgb(95,105,131); height: 30px; width: 500px; padding: 0 4px; font-size: 12px; border: 1px solid rgb(201,209,219)">
+        <input type="submit" name="submit" value="Run" style="font-weight: bold; color: rgb(95,105,131); font-size: 12px; height: 31px; padding: 0 10px; margin-left: 10px; border: 1px solid rgb(201,209,219); background-color: rgb(242,244,246)">
+      </form>
+      <div class="confirmation">
+        <p class="confirm-text" style="color: rgb(95,105,131); font-size: 15px"></p>
+      </div>
+      <div style="clear: both;"></div>
+      <div id="table"></div>
+    </div>
     <script>
-      // Run queries and display results here
+      var pageNum = 0;
+      var nextPage = true;
+      var output = [];
+      var peopleTable  = $('#table').MPTable({
+        firstColHeader: 'Distinct ID'
+      });
+          
+      // Function for pagination
+      function getAdditionalProfiles(propertyName, pageNum, sessionId, output, callback){
+        MP.api.people({where: propertyName, page: pageNum, session_id: sessionId}).done(function(peopleProf) {
+          numPeople = Object.keys(peopleProf.values().results).length;
+          if (numPeople == 1000) {
+            pageNum++;
+            output.push(peopleProf.values().results);
+            getAdditionalProfiles(propertyName, pageNum, sessionId, output, callback);
+          } else { 
+            // Ending iteration
+            output.push(peopleProf.values().results)
+            totalProfiles = (pageNum)*1000 + numPeople;
+            callback(propertyName, output, totalProfiles);
+          }; 
+        })
+      };
+          
+          
+      //Record selector for profiles
+      $('#property').submit(function(e) {
+        e.preventDefault();
+        var propertyName = $('#property input:first').val();
+        
+        //Building out profiles  
+        MP.api.people({where: propertyName, page: 0}).done(function(results) {
+          
+          // This is invoked after all of the people profiles have been loaded
+          // If pagination is required, it is passed as a callback to "getAdditionalProfiles".
+          function finishPagination(propertyName, output, totalProfiles) {
+            $('.confirm-text').html("Property: <strong>" + propertyName + "</strong><br># People profiles that match: <strong>" + totalProfiles + "</strong>").css("color", "rgb(95,105,131)");
+            renderTable(output, totalProfiles);
+          };
+          
+          // Requesting the People API
+          var sessionId = results.values()['session_id'];
+          var numPeople = Object.keys(results.values().results).length;
+          var pageNum = 0;
+          // If the page size is not 1000, we can continue. Otherwise, we need to paginate.
+          if (numPeople !== 1000) {
+            output = [results.values().results];
+            var totalProfiles = numPeople;
+            finishPagination(propertyName, output, totalProfiles);
+          } else {
+            output = [results.values().results];
+            pageNum++;
+            getAdditionalProfiles(propertyName, pageNum, sessionId, output, finishPagination);
+          };
+          
+        }).fail(function() {
+          $('.confirm-text').html("Error: Please enter a valid property selector.").css("color", "red");
+        });
+      });
+      
+      // @param {Array} data - an unformatted response containing all profiles
+      function renderTable(data, totalProfiles) {
+        // Create list of profiles
+        var profiles = [];
+        for (i = 0; i < data.length; i++) {
+          _.each(_.keys(data[i]), function(profileIndex){
+            var profileData = data[i][profileIndex];
+            profiles.push(profileData)
+          });
+        };
+        
+        // This array is important because objects aren't ordered.
+        // Maintaing order is required for rendering the table.
+        var propKeys = getSubKeys(profiles);
+        console.log(propKeys);
+        var tableData = {};
+        
+        _.each(_.keys(profiles), function(profileIndex){
+          var profilePropData = {};
+          _.each(propKeys, function(propKey){
+            value = profiles[profileIndex]['$properties'][propKey] || 'undefined';
+            // I'm ignoring objects for now.
+            if (typeof value !== 'object') {
+              profilePropData[String(propKey)] = value;
+            } else {
+              profilePropData[String(propKey)] = 'Object';
+            }
+          });
+          tableData[String(profiles[profileIndex]['$distinct_id'])] = profilePropData;
+        });
+        
+        console.log(tableData);
+        peopleTable.MPTable('setData', tableData);
+        peopleTable.height(40 * (totalProfiles + 1));
+      };
+      
+      //Creating list of every property key
+      function getSubKeys(listOfDicts) {
+        subkeys = [];
+        //For each profile
+        _.each(_.keys(listOfDicts), function(profileIndex){
+          var profilePropData = listOfDicts[profileIndex]['$properties'];
+          _.each(_.keys(profilePropData), function(property){
+            if (subkeys.indexOf(property) === -1) {
+              subkeys.push(property);
+            }
+          });
+        });
+        return subkeys;
+      };  
+
     </script>
   </body>
 </html>
